@@ -26,7 +26,7 @@ import utils.streams2.Streams;
 
 public class Main {
 
-	private static final String TEST_PROJECT_PATH = "../_pasted_code_";
+	private static final String TEST_PROJECT_PATH = "_pasted_code_";
 
 	public static void main(String[] args) {
 		Path path =
