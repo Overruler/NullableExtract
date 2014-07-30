@@ -8,7 +8,7 @@ Works at least on the annotated JDK (jdk8.jar) distributed in the [Checker Frame
 
 ## Requirements
 
-Depends on [SuperiorStreams](https://github.com/Overruler/SuperiorStreams) which can Git cloned using [HTTPS](https://github.com/Overruler/SuperiorStreams.git) or from its GitHub site.
+Depends on [SuperiorStreams](https://github.com/Overruler/SuperiorStreams) which can be Git cloned using [HTTPS](https://github.com/Overruler/SuperiorStreams.git) or from its GitHub site.
 
 Built with the Eclipse IDE.
 
