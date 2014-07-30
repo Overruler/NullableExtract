@@ -56,13 +56,13 @@ public class Main {
 				if(methodsFound > 0) {
 					output(entry.lhs, buf.toString());
 					if(packages.contains(currentPackage) == false) {
-						output(packagePart + "/Nullable.java", currentPackage +
+						outputExtra(packagePart + "/Nullable.java", currentPackage +
 						"@java.lang.annotation.Target({ java.lang.annotation.ElementType.TYPE_USE })\n" +
 						"public @interface Nullable {}\n");
 						packages.add(currentPackage);
 					}
 					if(cn.name.endsWith("java/lang/Thread")) {
-						output(
+						outputExtra(
 							"java/lang/Thread$UncaughtExceptionHandler.java",
 							"package java.lang;\npublic interface Thread$UncaughtExceptionHandler {}\n");
 					}
@@ -164,7 +164,13 @@ public class Main {
 		}
 	}
 	private static void output(String name, String data) throws IOException {
-		Path path = Paths.get(TEST_PROJECT_PATH, "src", name.replace(".class", ".java"));
+		output(name, data, "src");
+	}
+	private static void outputExtra(String name, String data) throws IOException {
+		output(name, data, "src-extra");
+	}
+	private static void output(String name, String data, String src) throws IOException {
+		Path path = Paths.get(TEST_PROJECT_PATH, src, name.replace(".class", ".java"));
 		byte[] bytes = data.getBytes(StandardCharsets.UTF_8);
 		Files.createDirectories(path.getParent());
 		Files.write(path, bytes);
