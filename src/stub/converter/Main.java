@@ -11,11 +11,17 @@ import java.util.jar.JarFile;
 import jdk.internal.org.objectweb.asm.ClassReader;
 import jdk.internal.org.objectweb.asm.Opcodes;
 import jdk.internal.org.objectweb.asm.Type;
+import jdk.internal.org.objectweb.asm.TypePath;
 import jdk.internal.org.objectweb.asm.TypeReference;
+import jdk.internal.org.objectweb.asm.signature.SignatureReader;
+import jdk.internal.org.objectweb.asm.signature.SignatureVisitor;
 import jdk.internal.org.objectweb.asm.tree.AnnotationNode;
 import jdk.internal.org.objectweb.asm.tree.ClassNode;
 import jdk.internal.org.objectweb.asm.tree.MethodNode;
 import jdk.internal.org.objectweb.asm.tree.TypeAnnotationNode;
+import jdk.internal.org.objectweb.asm.util.CheckSignatureAdapter;
+import jdk.internal.org.objectweb.asm.util.TraceSignatureVisitor;
+import utils.lists2.ArrayList;
 import utils.lists2.Files;
 import utils.lists2.HashMap;
 import utils.lists2.HashMap.Entry;
@@ -52,6 +58,9 @@ public class Main {
 				String currentPackage = "package " + packagePart.replace('/', '.') + ";\n";
 				StringBuilder buf = new StringBuilder();
 				buf.append(currentPackage);
+				if(cn.name.endsWith("java/lang/Class")) {
+					System.out.println("BREAK");
+				}
 				int methodsFound = processClass(cn, buf);
 				if(methodsFound > 0) {
 					output(entry.lhs, buf.toString());
@@ -107,11 +116,22 @@ public class Main {
 		return methodAccessMask;
 	}
 	private static int processAllMethods(ClassNode cn, StringBuilder buf, int methodAccessMask, String currentClass) {
+		ArrayList<String> sharedParams = new ArrayList<>();
+		if(cn.signature != null) {
+			SignatureVisitor v = new CheckSignatureAdapter(Opcodes.ASM5, CheckSignatureAdapter.CLASS_SIGNATURE, null) {
+
+				@Override
+				public void visitFormalTypeParameter(final String name) {
+					super.visitFormalTypeParameter(name);
+					sharedParams.add(name);
+				}
+			};
+			SignatureReader r = new SignatureReader(cn.signature);
+			r.accept(v);
+			System.out.println(sharedParams);
+		}
 		int methodsFound = 0;
 		for(MethodNode method : cn.methods) {
-			String descriptor = method.desc;
-			Type returnType = Type.getReturnType(descriptor);
-			List<Type> argumentTypes = asList(Type.getArgumentTypes(descriptor));
 			List<AnnotationNode> annotations =
 				collect(method.visibleParameterAnnotations).addAll(collect(method.invisibleParameterAnnotations)).removeIf(
 					Main::keepNullable);
@@ -123,6 +143,29 @@ public class Main {
 			}
 			if((method.access & Opcodes.ACC_SYNTHETIC) != 0) {
 				continue;
+			}
+			String descriptor = method.desc;
+			Type returnType = Type.getReturnType(descriptor);
+			List<Type> argumentTypes = asList(Type.getArgumentTypes(descriptor));
+			ArrayList<String> params = sharedParams.toArrayList();
+			if(method.signature != null) {
+				TraceSignatureVisitor trace = new TraceSignatureVisitor(0);
+				SignatureVisitor v =
+					new CheckSignatureAdapter(Opcodes.ASM5, CheckSignatureAdapter.METHOD_SIGNATURE, trace) {
+
+						@Override
+						public void visitFormalTypeParameter(final String name) {
+							super.visitFormalTypeParameter(name);
+							params.add(name);
+						}
+					};
+				SignatureReader r = new SignatureReader(method.signature);
+				r.accept(v);
+				String declaration = trace.getDeclaration();
+				String returnType2 = trace.getReturnType();
+				System.out.println(params);
+				System.out.println(declaration);
+				System.out.println(returnType2);
 			}
 			methodsFound++;
 			buf.append('\t');
@@ -187,6 +230,7 @@ public class Main {
 		Type argumentType,
 		int index,
 		List<TypeAnnotationNode> typeAnnotations) {
+		String className = null;
 		for(TypeAnnotationNode node : typeAnnotations) {
 			TypeReference reference = new TypeReference(node.typeRef);
 			if(reference.getSort() != TypeReference.METHOD_FORMAL_PARAMETER || node.desc.contains("Nullable") == false) {
@@ -195,33 +239,52 @@ public class Main {
 			if(reference.getFormalParameterIndex() != index) {
 				continue;
 			}
-			argumentType = adjustType(argumentType, node);
+			className = adjustTypeSimplistically(argumentType, node);
 			break;
 		}
-		String className = argumentType.getClassName();
+		if(className == null) {
+			className = argumentType.getClassName();
+		}
 		out.append(className).append(' ');
 	}
 	private static void appendReturnType(StringBuilder out, Type returnType, List<TypeAnnotationNode> typeAnnotations) {
+		String className = null;
 		for(TypeAnnotationNode node : typeAnnotations) {
 			TypeReference reference = new TypeReference(node.typeRef);
 			if(reference.getSort() != TypeReference.METHOD_RETURN || node.desc.contains("Nullable") == false) {
 				continue;
 			}
-			returnType = adjustType(returnType, node);
+			className = adjustTypeSimplistically(returnType, node);
 			break;
 		}
-		String className = returnType.getClassName();
+		if(className == null) {
+			className = returnType.getClassName();
+		}
 		out.append(className).append(' ');
 	}
-	private static Type adjustType(Type type, TypeAnnotationNode node) {
+	private static String adjustTypeSimplistically(Type type, TypeAnnotationNode node) {
 		int indexOf;
 		String desc = type.getDescriptor();
 		if(node.typePath != null) {
 			indexOf = 0;
-			String path = node.typePath.toString();
-			for(int i = 0, n = path.length(); i < n; i++) {
+			TypePath path = node.typePath;
+			for(int i = 0, n = path.getLength(); i < n; i++) {
 				if(indexOf != -1) {
-					indexOf = desc.indexOf(path.charAt(i));
+					switch(path.getStep(i)) {
+						case TypePath.ARRAY_ELEMENT:
+							indexOf = desc.indexOf('[', indexOf);
+							break;
+						case TypePath.INNER_TYPE:
+							indexOf = desc.indexOf('.', indexOf);
+							break;
+						case TypePath.TYPE_ARGUMENT:
+							// Needed to handle things like Class<@Nullable ?>
+							// Nothing for now
+							break;
+						case TypePath.WILDCARD_BOUND:
+							indexOf = desc.indexOf('*', indexOf);
+							break;
+					}
 				}
 			}
 			if(indexOf != -1) {
@@ -235,9 +298,13 @@ public class Main {
 		}
 		if(indexOf != -1) {
 			String descriptor = desc.substring(0, indexOf + 1) + "@Nullable " + desc.substring(indexOf + 1);
-			type = Type.getReturnType(descriptor);
+			return Type.getReturnType(descriptor).getClassName();
 		}
-		return type;
+		String className = type.getClassName();
+		if(desc.contains("[")) {
+			return className.substring(0, className.length() - 2) + " @Nullable []";
+		}
+		return className;
 	}
 	private static <T> List<T> asList(java.util.List<T> items) {
 		return items == null || items.size() == 0 ? List.of() : List.fromJavaCollection(items);
